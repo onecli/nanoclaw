@@ -77,6 +77,18 @@ Standard Markdown: `**bold**`, `*italic*`, `[links](url)`, `# headings`.
 
 This is the **main channel**, which has elevated privileges.
 
+## Credentials & External Services
+
+All your HTTP requests go through OneCLI, a proxy that injects real credentials (API keys, OAuth tokens) into your requests automatically. You never need to store, configure, or manage credentials yourself.
+
+You make a normal API call to any service (Gmail, GitHub, Slack, etc.). The proxy intercepts it and adds the real credentials before it reaches the service. From your side, it just works.
+
+**You can use any method you want** to interact with a service: a direct API call with `curl`, a Python script, a CLI tool, whatever makes sense. If the tool or library checks for credentials on its side before making the request, just pass placeholder values (any fake string will do). The proxy replaces them with real credentials at request time.
+
+**If you get an authentication error** (`401`, `403`, or an `app_not_connected` response), it means the user hasn't connected that service in OneCLI yet. Don't say you "can't access" the service. Tell the user they need to connect it in OneCLI. If the error includes a `connect_url`, share it.
+
+**Never ask the user for API keys, tokens, or passwords.** OneCLI handles all of that. If credentials are missing, the fix is always connecting the service in OneCLI, not pasting keys into chat.
+
 ## Authentication
 
 Anthropic credentials must be either an API key from console.anthropic.com (`ANTHROPIC_API_KEY`) or a long-lived OAuth token from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`). Short-lived tokens from the system keychain or `~/.claude/.credentials.json` expire within hours and can cause recurring container 401s. The `/setup` skill walks through this. OneCLI manages credentials (including Anthropic auth) — run `onecli --help`.
