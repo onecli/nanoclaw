@@ -1,0 +1,53 @@
+# NanoClaw VM Image for exe.dev
+# Multi-stage build: compile in node image, run on exeuntu (has Docker + systemd)
+
+# ── Stage 1: Build ────────────────────────────────────────────────────────
+FROM node:22-slim AS builder
+
+RUN apt-get update && apt-get install -y build-essential python3 && rm -rf /var/lib/apt/lists/*
+
+COPY . /build
+WORKDIR /build
+
+# Install and build NanoClaw
+RUN npm install --ignore-scripts=false && npm rebuild && npm run build
+
+# Install and build bootstrap API
+WORKDIR /build/deploy/bootstrap
+RUN npm install && npm run build
+
+# ── Stage 2: Runtime ──────────────────────────────────────────────────────
+FROM ghcr.io/boldsoftware/exeuntu:latest
+
+# Node.js 22
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-built NanoClaw (no source code, no build tools)
+COPY --from=builder /build/dist /opt/nanoclaw/dist
+COPY --from=builder /build/node_modules /opt/nanoclaw/node_modules
+COPY --from=builder /build/package.json /opt/nanoclaw/package.json
+COPY --from=builder /build/groups /opt/nanoclaw/groups
+COPY --from=builder /build/container/agent-runner/src /opt/nanoclaw/container/agent-runner/src
+
+# Pre-built bootstrap API
+COPY --from=builder /build/deploy/bootstrap/dist /opt/nanoclaw/deploy/bootstrap/dist
+COPY --from=builder /build/deploy/bootstrap/node_modules /opt/nanoclaw/deploy/bootstrap/node_modules
+COPY --from=builder /build/deploy/bootstrap/package.json /opt/nanoclaw/deploy/bootstrap/package.json
+
+# Systemd services
+COPY deploy/nanoclaw.service /etc/systemd/system/nanoclaw.service
+COPY deploy/bootstrap.service /etc/systemd/system/bootstrap.service
+COPY deploy/first-boot.sh /opt/first-boot.sh
+RUN chmod +x /opt/first-boot.sh
+
+# Enable bootstrap API on boot (NanoClaw started via bootstrap API after setup)
+RUN systemctl enable bootstrap.service
+
+# Directories (777 so container's node user can write to mounted paths)
+RUN mkdir -p /opt/nanoclaw/data /opt/nanoclaw/logs /opt/nanoclaw/store \
+    && chmod -R 777 /opt/nanoclaw/data /opt/nanoclaw/logs /opt/nanoclaw/store
+
+EXPOSE 8000
+CMD ["/sbin/init"]
