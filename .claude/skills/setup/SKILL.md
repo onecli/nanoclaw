@@ -18,13 +18,13 @@ Check the git remote configuration to ensure the user has a fork and upstream is
 Run:
 - `git remote -v`
 
-**Case A — `origin` points to `qwibitai/nanoclaw` (user cloned directly):**
+**Case A — `origin` points to `onecli/nanoclaw` (user cloned directly):**
 
 The user cloned instead of forking. AskUserQuestion: "You cloned NanoClaw directly. We recommend forking so you can push your customizations. Would you like to set up a fork?"
 - Fork now (recommended) — walk them through it
 - Continue without fork — they'll only have local changes
 
-If fork: instruct the user to fork `qwibitai/nanoclaw` on GitHub (they need to do this in their browser), then ask them for their GitHub username. Run:
+If fork: instruct the user to fork `onecli/nanoclaw` on GitHub (they need to do this in their browser), then ask them for their GitHub username. Run:
 ```bash
 git remote rename origin upstream
 git remote add origin https://github.com/<their-username>/nanoclaw.git
@@ -34,21 +34,21 @@ Verify with `git remote -v`.
 
 If continue without fork: add upstream so they can still pull updates:
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/onecli/nanoclaw.git
 ```
 
 **Case B — `origin` points to user's fork, no `upstream` remote:**
 
 Add upstream:
 ```bash
-git remote add upstream https://github.com/qwibitai/nanoclaw.git
+git remote add upstream https://github.com/onecli/nanoclaw.git
 ```
 
-**Case C — both `origin` (user's fork) and `upstream` (qwibitai) exist:**
+**Case C — both `origin` (user's fork) and `upstream` (onecli) exist:**
 
 Already configured. Continue.
 
-**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `qwibitai/nanoclaw.git`.
+**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `onecli/nanoclaw.git`.
 
 ## 1. Bootstrap (Node.js + Dependencies)
 
@@ -142,16 +142,15 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 The credential system depends on the container runtime chosen in step 3.
 
-### 4a. Docker → OneCLI
+### 4a. Docker → OneCLI Cloud
 
-Install OneCLI and its CLI tool:
+Install the OneCLI CLI:
 
 ```bash
-curl -fsSL onecli.sh/install | sh
 curl -fsSL onecli.sh/cli/install | sh
 ```
 
-Verify both installed: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
+Verify: `onecli version`. If the command is not found, the CLI was likely installed to `~/.local/bin/`. Add it to PATH for the current session and persist it:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -162,14 +161,23 @@ grep -q '.local/bin' ~/.zshrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin
 
 Then re-verify with `onecli version`.
 
-Point the CLI at the local OneCLI instance, the ONECLI_URL was output from the install script above:
+Point the CLI at OneCLI Cloud (reads ONECLI_URL from `.env`, defaults to `https://app.onecli.sh`):
 ```bash
-onecli config set api-host ${ONECLI_URL}
+source .env 2>/dev/null
+onecli config set api-host "${ONECLI_URL:-https://app.onecli.sh}"
 ```
 
-Ensure `.env` has the OneCLI URL (create the file if it doesn't exist):
+Ensure `.env` has the OneCLI Cloud URL (create the file if it doesn't exist):
 ```bash
-grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=${ONECLI_URL}' >> .env
+grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=https://app.onecli.sh' >> .env
+```
+
+If `ONECLI_API_KEY` is missing from `.env`, ask the user for their API key from the OneCLI Cloud dashboard (Settings → API Keys) and add it to `.env`.
+
+Authenticate the CLI with the API key:
+```bash
+source .env 2>/dev/null
+onecli auth login --api-key "$ONECLI_API_KEY"
 ```
 
 Check if a secret already exists:
@@ -192,9 +200,9 @@ Tell the user:
 
 Then stop and wait for the user to confirm they have the token. Do NOT proceed until they respond.
 
-Once they confirm, they register it with OneCLI. AskUserQuestion with two options:
+Once they confirm, they register it with OneCLI Cloud. AskUserQuestion with two options:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open ${ONECLI_URL} and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
+1. **Dashboard** — description: "Open the dashboard at `${ONECLI_URL}/connections/secrets`, click '+ Add Secret', choose type 'anthropic', and paste your token as the value."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
 
 #### API key path
@@ -203,7 +211,7 @@ Tell the user to get an API key from https://console.anthropic.com/settings/keys
 
 Then AskUserQuestion with two options:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open ${ONECLI_URL} and add the secret in the UI."
+1. **Dashboard** — description: "Open the dashboard at `${ONECLI_URL}/connections/secrets`, click '+ Add Secret', choose type 'anthropic', and paste your key as the value."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
 
 #### After either path
@@ -324,7 +332,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), credential system not running (Docker: check `curl ${ONECLI_URL}/api/health`; Apple Container: check `.env` credentials), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), credential system not running (Docker: verify OneCLI Cloud is reachable at the ONECLI_URL from `.env`; Apple Container: check `.env` credentials), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
