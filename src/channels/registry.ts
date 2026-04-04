@@ -9,6 +9,11 @@ export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  tryAutoRegister?: (
+    chatJid: string,
+    chatName: string,
+    isGroup: boolean,
+  ) => boolean;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;
