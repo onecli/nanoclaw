@@ -5,11 +5,13 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  AUTO_REGISTER,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
+  ONECLI_API_KEY,
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
@@ -78,7 +80,7 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
@@ -634,6 +636,31 @@ async function main(): Promise<void> {
     }
   }
 
+  // Auto-register first chat as main group (cloud deploy)
+  function tryAutoRegister(
+    chatJid: string,
+    chatName: string,
+    _isGroup: boolean,
+  ): boolean {
+    if (!AUTO_REGISTER) return false;
+    if (Object.keys(registeredGroups).length > 0) return false;
+
+    registerGroup(chatJid, {
+      name: chatName,
+      folder: 'main',
+      trigger: DEFAULT_TRIGGER,
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+      isMain: true,
+    });
+
+    logger.info(
+      { chatJid, chatName },
+      'Auto-registered first chat as main group',
+    );
+    return true;
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -672,6 +699,7 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    tryAutoRegister,
   };
 
   // Create and connect all registered channels.
