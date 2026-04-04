@@ -1,0 +1,14 @@
+[Unit]
+Description=NanoClaw Bootstrap API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/nanoclaw/deploy/bootstrap
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+Environment=PORT=8000
+
+[Install]
+WantedBy=multi-user.target
