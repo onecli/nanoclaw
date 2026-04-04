@@ -5,11 +5,14 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  AUTO_REGISTER,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
+  STORE_DIR,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
+  ONECLI_API_KEY,
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
@@ -78,7 +81,7 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-const onecli = new OneCLI({ url: ONECLI_URL });
+const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
@@ -634,6 +637,31 @@ async function main(): Promise<void> {
     }
   }
 
+  // Auto-register first chat as main group (cloud deploy)
+  function tryAutoRegister(
+    chatJid: string,
+    chatName: string,
+    _isGroup: boolean,
+  ): boolean {
+    if (!AUTO_REGISTER) return false;
+    if (Object.keys(registeredGroups).length > 0) return false;
+
+    registerGroup(chatJid, {
+      name: chatName,
+      folder: 'main',
+      trigger: DEFAULT_TRIGGER,
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+      isMain: true,
+    });
+
+    logger.info(
+      { chatJid, chatName },
+      'Auto-registered first chat as main group',
+    );
+    return true;
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -672,11 +700,14 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    tryAutoRegister,
   };
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  const channelStatus: Record<string, { status: string; error?: string }> = {};
+
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -685,11 +716,33 @@ async function main(): Promise<void> {
         { channel: channelName },
         'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
       );
+      channelStatus[channelName] = {
+        status: 'missing_credentials',
+      };
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+      channelStatus[channelName] = { status: 'connected' };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ channel: channelName, err }, 'Channel failed to connect');
+      channelStatus[channelName] = {
+        status: 'error',
+        error: message,
+      };
+    }
   }
+
+  // Persist channel status so the bootstrap API can report it
+  try {
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'channel-status.json'),
+      JSON.stringify(channelStatus, null, 2),
+    );
+  } catch {}
+
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);

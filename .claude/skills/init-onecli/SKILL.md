@@ -1,32 +1,36 @@
 ---
 name: init-onecli
-description: Install and initialize OneCLI Agent Vault. Migrates existing .env credentials to the vault. Use after /update-nanoclaw brings in OneCLI as a breaking change, or for first-time OneCLI setup.
+description: Configure OneCLI Cloud Agent Vault. Migrates existing .env credentials to the cloud vault. Use after /update-nanoclaw brings in OneCLI as a breaking change, or for first-time OneCLI Cloud setup.
 ---
 
-# Initialize OneCLI Agent Vault
+# Initialize OneCLI Cloud Agent Vault
 
-This skill installs OneCLI, configures the Agent Vault gateway, and migrates any existing `.env` credentials into it. Run this after `/update-nanoclaw` introduces OneCLI as a breaking change, or any time OneCLI needs to be set up from scratch.
+This skill configures the OneCLI Cloud Agent Vault gateway and migrates any existing `.env` credentials into it. Run this after `/update-nanoclaw` introduces OneCLI as a breaking change, or any time OneCLI Cloud needs to be set up.
 
 **Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. pasting a token).
 
 ## Phase 1: Pre-flight
 
-### Check if OneCLI is already working
+### Check if OneCLI Cloud is already configured
+
+Check `.env` for OneCLI Cloud configuration:
 
 ```bash
-onecli version 2>/dev/null
+grep 'ONECLI_URL' .env && grep 'ONECLI_API_KEY' .env
 ```
 
-If the command succeeds, OneCLI is installed, check for an Anthropic secret:
+If both are present, check if the cloud gateway is reachable:
 
 ```bash
-onecli secrets list
+source .env && curl -sf "${ONECLI_URL}/health"
 ```
 
-If an Anthropic secret exists, tell the user OneCLI is already configured and working. Use AskUserQuestion:
+If reachable, check the OneCLI Cloud dashboard (Secrets page at ONECLI_URL) for an Anthropic secret.
 
-1. **Keep current setup** — description: "OneCLI is installed and has credentials configured. Nothing to do."
-2. **Reconfigure** — description: "Start fresh — reinstall OneCLI and re-register credentials."
+If an Anthropic secret exists, tell the user OneCLI Cloud is already configured and working. Use AskUserQuestion:
+
+1. **Keep current setup** — description: "OneCLI Cloud is configured and has credentials. Nothing to do."
+2. **Reconfigure** — description: "Start fresh — re-register credentials in the cloud."
 
 If they choose to keep, skip to Phase 5 (Verify). If they choose to reconfigure, continue.
 
@@ -36,10 +40,10 @@ If they choose to keep, skip to Phase 5 (Verify). If they choose to reconfigure,
 grep "credential-proxy" src/index.ts 2>/dev/null
 ```
 
-If `startCredentialProxy` is imported, the native credential proxy skill is active. Tell the user: "You're currently using the native credential proxy (`.env`-based). This skill will switch you to OneCLI's Agent Vault, which adds per-agent policies and rate limits. Your `.env` credentials will be migrated to the vault."
+If `startCredentialProxy` is imported, the native credential proxy skill is active. Tell the user: "You're currently using the native credential proxy (`.env`-based). This skill will switch you to OneCLI Cloud's Agent Vault, which adds per-agent policies and rate limits. Your `.env` credentials will be migrated to the cloud vault."
 
 Use AskUserQuestion:
-1. **Continue** — description: "Switch to OneCLI Agent Vault."
+1. **Continue** — description: "Switch to OneCLI Cloud Agent Vault."
 2. **Cancel** — description: "Keep the native credential proxy."
 
 If they cancel, stop.
@@ -52,12 +56,11 @@ grep "@onecli-sh/sdk" package.json
 
 If `@onecli-sh/sdk` is NOT in package.json, the codebase hasn't been updated to use OneCLI yet. Tell the user to run `/update-nanoclaw` first to get the OneCLI integration, then retry `/init-onecli`. Stop here.
 
-## Phase 2: Install OneCLI
+## Phase 2: Install & Configure OneCLI CLI
 
-### Install the gateway and CLI
+### Install the CLI
 
 ```bash
-curl -fsSL onecli.sh/install | sh
 curl -fsSL onecli.sh/cli/install | sh
 ```
 
@@ -75,36 +78,41 @@ Re-verify with `onecli version`.
 
 ### Configure the CLI
 
-Point the CLI at the local OneCLI instance, the ONECLI_URL was output from the install script above:
+Point the CLI at OneCLI Cloud (reads ONECLI_URL from `.env`, defaults to `https://app.onecli.sh`):
 
 ```bash
-onecli config set api-host ${ONECLI_URL}
+source .env 2>/dev/null
+onecli config set api-host "${ONECLI_URL:-https://app.onecli.sh}"
 ```
 
 ### Set ONECLI_URL in .env
 
 ```bash
-grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=${ONECLI_URL}' >> .env
+grep -q 'ONECLI_URL' .env 2>/dev/null || echo 'ONECLI_URL=https://app.onecli.sh' >> .env
 ```
 
-### Wait for gateway readiness
+### Set ONECLI_API_KEY in .env
 
-The gateway may take a moment to start after installation. Poll for up to 15 seconds:
+If `ONECLI_API_KEY` is not already in `.env`, ask the user for their API key from the OneCLI Cloud dashboard (Settings → API Keys) and add it:
 
 ```bash
-for i in $(seq 1 15); do
-  curl -sf ${ONECLI_URL}/health && break
-  sleep 1
-done
+echo 'ONECLI_API_KEY=<their-key>' >> .env
 ```
 
-If it never becomes healthy, check if the gateway process is running:
+### Authenticate the CLI
 
 ```bash
-ps aux | grep -i onecli | grep -v grep
+source .env 2>/dev/null
+onecli auth login --api-key "$ONECLI_API_KEY"
 ```
 
-If it's not running, try starting it manually: `onecli start`. If that fails, show the error and stop — the user needs to debug their OneCLI installation.
+### Verify cloud gateway is reachable
+
+```bash
+source .env && curl -sf "${ONECLI_URL}/health"
+```
+
+If the gateway is not reachable, verify the `ONECLI_URL` value in `.env` is correct and that the user has an active OneCLI Cloud account.
 
 ## Phase 3: Migrate existing credentials
 
@@ -128,7 +136,7 @@ Parse the file for any of the credential variables listed above.
 
 ### If credentials found in .env
 
-For each credential found, migrate it to OneCLI:
+For each credential found, migrate it to OneCLI Cloud:
 
 **Anthropic API key** (`ANTHROPIC_API_KEY=sk-ant-...`):
 ```bash
@@ -140,14 +148,14 @@ onecli secrets create --name Anthropic --type anthropic --value <key> --host-pat
 onecli secrets create --name Anthropic --type anthropic --value <token> --host-pattern api.anthropic.com
 ```
 
-After successful migration, remove the credential lines from `.env`. Use the Edit tool to remove only the credential variable lines (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`). Keep all other `.env` entries intact (e.g. `ONECLI_URL`, `TELEGRAM_BOT_TOKEN`, channel tokens).
+After successful migration, remove the credential lines from `.env`. Use the Edit tool to remove only the credential variable lines (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`). Keep all other `.env` entries intact (e.g. `ONECLI_URL`, `ONECLI_API_KEY`, `TELEGRAM_BOT_TOKEN`, channel tokens).
 
 Verify the secret was registered:
 ```bash
 onecli secrets list
 ```
 
-Tell the user: "Migrated your Anthropic credentials from `.env` to the OneCLI Agent Vault. The raw keys have been removed from `.env` — they're now managed by OneCLI and will be injected at request time without entering containers."
+Tell the user: "Migrated your Anthropic credentials from `.env` to the OneCLI Cloud Agent Vault. The raw keys have been removed from `.env` — they're now managed by OneCLI Cloud and will be injected at request time without entering containers."
 
 ### Offer to migrate other container-facing credentials
 
@@ -188,7 +196,7 @@ onecli secrets list
 
 No migration needed. Proceed to register credentials fresh.
 
-Check if OneCLI already has an Anthropic secret:
+Check if OneCLI Cloud already has an Anthropic secret:
 ```bash
 onecli secrets list
 ```
@@ -208,7 +216,7 @@ Tell the user to run `claude setup-token` in another terminal and copy the token
 
 Once they have the token, AskUserQuestion with two options:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open ${ONECLI_URL} and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
+1. **Dashboard** — description: "Open the dashboard at `${ONECLI_URL}/connections/secrets`, click '+ Add Secret', choose type 'anthropic', and paste your token as the value."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
 
 #### API key path
@@ -217,7 +225,7 @@ Tell the user to get an API key from https://console.anthropic.com/settings/keys
 
 AskUserQuestion with two options:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open ${ONECLI_URL} and add the secret in the UI."
+1. **Dashboard** — description: "Open the dashboard at `${ONECLI_URL}/connections/secrets`, click '+ Add Secret', choose type 'anthropic', and paste your key as the value."
 2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
 
 #### After either path
@@ -254,17 +262,15 @@ Expected: `OneCLI gateway config applied` messages when containers start.
 If the service is running and a channel is configured, tell the user to send a test message to verify the agent responds.
 
 Tell the user:
-- OneCLI Agent Vault is now managing credentials
+- OneCLI Cloud Agent Vault is now managing credentials
 - Agents never see raw API keys — credentials are injected at the gateway level
-- To manage secrets: `onecli secrets list`, or open ${ONECLI_URL}
+- To manage secrets: `onecli secrets list`, or open the OneCLI Cloud dashboard
 - To add rate limits or policies: `onecli rules create --help`
 
 ## Troubleshooting
 
-**"OneCLI gateway not reachable" in logs:** The gateway isn't running. Check with `curl -sf ${ONECLI_URL}/health`. Start it with `onecli start` if needed.
+**"OneCLI gateway not reachable" in logs:** The cloud gateway isn't reachable. Check with `source .env && curl -sf "${ONECLI_URL}/health"`. Verify `ONECLI_URL` and `ONECLI_API_KEY` are correctly set in `.env`.
 
-**Container gets no credentials:** Verify `ONECLI_URL` is set in `.env` and the gateway has an Anthropic secret (`onecli secrets list`).
+**Container gets no credentials:** Verify `ONECLI_URL` and `ONECLI_API_KEY` are set in `.env` and the gateway has an Anthropic secret (`onecli secrets list`).
 
 **Old .env credentials still present:** This skill should have removed them. Double-check `.env` for `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_AUTH_TOKEN` and remove them manually if still present.
-
-**Port 10254 already in use:** Another OneCLI instance may be running. Check with `lsof -i :10254` and kill the old process, or configure a different port.

@@ -1,0 +1,17 @@
+[Unit]
+Description=NanoClaw Agent Orchestrator
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/nanoclaw
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/nanoclaw/.env
+# IPC directories must be writable by the container's node user (uid 1000)
+UMask=0000
+
+[Install]
+WantedBy=multi-user.target
