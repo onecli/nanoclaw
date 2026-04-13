@@ -41,7 +41,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
   {
     text: z.string().describe('The message text to send'),
     sender: z
@@ -68,8 +68,42 @@ server.tool(
 );
 
 server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z
+      .string()
+      .describe('The emoji to react with (e.g. "👍", "❤️", "🔥")'),
+    message_id: z
+      .string()
+      .optional()
+      .describe(
+        'The message ID to react to. If omitted, reacts to the latest message in the chat.',
+      ),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [
+        { type: 'text' as const, text: `Reaction ${args.emoji} sent.` },
+      ],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
-  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
+  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
 CONTEXT MODE - Choose based on task type:
 \u2022 "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
@@ -191,7 +225,6 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
     const data = {
       type: 'schedule_task',
-      taskId,
       prompt: args.prompt,
       script: args.script || undefined,
       schedule_type: args.schedule_type,
@@ -202,7 +235,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    const filename = writeIpcFile(TASKS_DIR, data);
 
     return {
       content: [
