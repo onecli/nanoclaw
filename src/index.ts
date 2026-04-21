@@ -823,15 +823,14 @@ async function main(): Promise<void> {
     }
   }
 
-  // Auto-register first private chat as main group (cloud deploy)
+  // Auto-register first chat as main group (cloud deploy)
   function tryAutoRegister(
     chatJid: string,
     chatName: string,
-    isGroup: boolean,
+    _isGroup: boolean,
   ): boolean {
     if (!AUTO_REGISTER) return false;
     if (Object.keys(registeredGroups).length > 0) return false;
-    if (isGroup) return false;
 
     registerGroup(chatJid, {
       name: chatName,
