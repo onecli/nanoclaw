@@ -44,6 +44,21 @@ app.post('/setup', async (req: Request, res: Response) => {
     ];
     fs.writeFileSync(ENV_PATH, lines.join('\n') + '\n');
 
+    // Replace default "Andy" with actual agent name in CLAUDE.md templates
+    const name = agentName || 'Andy';
+    if (name !== 'Andy') {
+      const claudeFiles = [
+        path.join(NANOCLAW_DIR, 'groups/main/CLAUDE.md'),
+        path.join(NANOCLAW_DIR, 'groups/global/CLAUDE.md'),
+      ];
+      for (const file of claudeFiles) {
+        try {
+          const content = fs.readFileSync(file, 'utf-8');
+          fs.writeFileSync(file, content.replaceAll('Andy', name));
+        } catch {}
+      }
+    }
+
     // Pull agent Docker image if needed
     await exec(`bash ${FIRST_BOOT_SCRIPT}`);
 
