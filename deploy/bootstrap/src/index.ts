@@ -13,6 +13,7 @@ const ENV_PATH = `${NANOCLAW_DIR}/.env`;
 const STORE_DIR = `${NANOCLAW_DIR}/store`;
 const QR_DATA_PATH = `${STORE_DIR}/qr-data.txt`;
 const AUTH_STATUS_PATH = `${STORE_DIR}/auth-status.txt`;
+const CHANNEL_STATUS_PATH = `${STORE_DIR}/channel-status.json`;
 const AUTH_CREDS_PATH = `${STORE_DIR}/auth/creds.json`;
 const FIRST_BOOT_SCRIPT = '/opt/first-boot.sh';
 
@@ -148,8 +149,9 @@ app.get('/status', async (_req: Request, res: Response) => {
     const channels = getConfiguredChannels();
     const agentName = getEnvValue('ASSISTANT_NAME') || 'Andy';
     const uptime = running && startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0;
+    const channelStatus = readChannelStatus();
 
-    res.json({ running, channels, agentName, uptime });
+    res.json({ running, channels, agentName, uptime, channelStatus });
   } catch (err) {
     console.error('Status check failed:', err);
     res.status(500).json({ error: 'Status check failed' });
@@ -268,6 +270,15 @@ function getConfiguredChannels(): string[] {
   if (getEnvValue('DISCORD_BOT_TOKEN')) channels.push('discord');
   if (fs.existsSync(AUTH_CREDS_PATH)) channels.push('whatsapp');
   return channels;
+}
+
+function readChannelStatus(): Record<string, { status: string; error?: string }> | null {
+  try {
+    const content = fs.readFileSync(CHANNEL_STATUS_PATH, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
 }
 
 async function isServiceActive(service: string): Promise<boolean> {

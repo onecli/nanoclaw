@@ -9,6 +9,7 @@ import {
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
+  STORE_DIR,
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_API_KEY,
@@ -911,6 +912,8 @@ async function main(): Promise<void> {
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  const channelStatus: Record<string, { status: string; error?: string }> = {};
+
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
@@ -919,11 +922,33 @@ async function main(): Promise<void> {
         { channel: channelName },
         'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
       );
+      channelStatus[channelName] = {
+        status: 'missing_credentials',
+      };
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+      channelStatus[channelName] = { status: 'connected' };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ channel: channelName, err }, 'Channel failed to connect');
+      channelStatus[channelName] = {
+        status: 'error',
+        error: message,
+      };
+    }
   }
+
+  // Persist channel status so the bootstrap API can report it
+  try {
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'channel-status.json'),
+      JSON.stringify(channelStatus, null, 2),
+    );
+  } catch {}
+
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
