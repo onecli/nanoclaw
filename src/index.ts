@@ -912,7 +912,46 @@ async function main(): Promise<void> {
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  const channelStatusPath = path.join(STORE_DIR, 'channel-status.json');
   const channelStatus: Record<string, { status: string; error?: string }> = {};
+
+  const writeChannelStatus = () => {
+    try {
+      fs.writeFileSync(
+        channelStatusPath,
+        JSON.stringify(channelStatus, null, 2),
+      );
+    } catch {}
+  };
+
+  // Catch async crashes from channel libraries (e.g. grammy unhandled rejections)
+  // and persist the error before the process restarts.
+  const origRejectionHandler = process.listeners('unhandledRejection');
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', (reason) => {
+    // Mark any "connecting" channel as errored
+    const hadConnecting = Object.entries(channelStatus).some(
+      ([, s]) => s.status === 'connecting',
+    );
+    for (const [name, s] of Object.entries(channelStatus)) {
+      if (s.status === 'connecting') {
+        channelStatus[name] = {
+          status: 'error',
+          error: reason instanceof Error ? reason.message : String(reason),
+        };
+      }
+    }
+    writeChannelStatus();
+    // Re-emit to the original handler (logger)
+    for (const handler of origRejectionHandler) {
+      (handler as (reason: unknown) => void)(reason);
+    }
+    // If a channel was mid-connect, exit cleanly so systemd restarts us
+    // rather than leaving the process hanging on a dead await
+    if (hadConnecting) {
+      process.exit(1);
+    }
+  });
 
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
@@ -928,6 +967,8 @@ async function main(): Promise<void> {
       continue;
     }
     try {
+      channelStatus[channelName] = { status: 'connecting' };
+      writeChannelStatus();
       await channel.connect();
       channels.push(channel);
       channelStatus[channelName] = { status: 'connected' };
@@ -941,13 +982,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // Persist channel status so the bootstrap API can report it
-  try {
-    fs.writeFileSync(
-      path.join(STORE_DIR, 'channel-status.json'),
-      JSON.stringify(channelStatus, null, 2),
-    );
-  } catch {}
+  writeChannelStatus();
 
   if (channels.length === 0) {
     logger.fatal('No channels connected');
